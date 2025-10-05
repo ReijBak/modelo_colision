@@ -1,5 +1,0 @@
-io
-numpy
-flask
-matplotlib
-cartopy
