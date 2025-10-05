@@ -1,4 +1,3 @@
-# sim_cesium_refinado_v2.py
 import math
 import io
 import numpy as np
@@ -10,79 +9,79 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
+
 # =======================================================
-# CLASE PRINCIPAL: Modelo físico + proyección + riesgo
+# CLASE PRINCIPAL (estructura limpia sin self.)
 # =======================================================
 class ModeloImpactoAsteroide:
     def __init__(self,
-                 mu=3.986004418e14,
-                 r_earth_m=6371000.0,
-                 r0_m=None,
-                 v0_ms=None,
-                 density_kgm3=3000.0,
-                 diameter_m=50.0,
-                 duracion_horas=1.0,
-                 dt_s=2.0,
-                 nframes_riesgo=35,
-                 lat_step_deg=5.0,
-                 lon_step_deg=5.0):
+                 mu,
+                 R_e,
+                 I0_pos,
+                 V_mov,
+                 d_ast,
+                 r_ast,
+                 S_time,
+                 S_Step,
+                 In_angle,
+                 vH0,
+                 vV0):
 
-        self.mu = mu
-        self.r_earth_m = r_earth_m
-        # el vector inicial ahora apunta desde arriba y se dirige hacia la Tierra
-        self.r0_m = np.array(r0_m if r0_m is not None else [0.0, -8.0e6, 4.0e6])
-        self.v0_ms = np.array(v0_ms if v0_ms is not None else [2500.0, 4500.0, -6500.0])
-        self.density = density_kgm3
-        self.diameter_m = diameter_m
-        self.duracion_horas = duracion_horas
-        self.dt_s = dt_s
+        # --- Parámetros auxiliares internos ---
+        nframes_riesgo = 35
+        lat_step_deg = 5.0
+        lon_step_deg = 5.0
 
-        self.lat_step_deg = lat_step_deg
-        self.lon_step_deg = lon_step_deg
-        self.nframes_riesgo = nframes_riesgo
+        # --- Simulación completa orquestada desde aquí ---
+        positions, times = ModeloImpactoAsteroide.simular_trayectoria(
+            mu, R_e, I0_pos, V_mov, S_time, S_Step
+        )
 
-        # Simular trayectoria
-        self.positions, self.times = self.simular_trayectoria()
+        lats, lons, corredor, impacto = ModeloImpactoAsteroide.proyectar_a_tierra(positions)
 
-        # Proyectar trayectoria a Tierra
-        self.lats, self.lons, self.corredor, self.impacto = self.proyectar_a_tierra(self.positions)
+        riesgo_frames = ModeloImpactoAsteroide.generar_frames_riesgo(
+            impacto, nframes_riesgo, lat_step_deg, lon_step_deg
+        )
 
-        # Generar evolución del riesgo global
-        self.riesgo_frames = self.generar_frames_riesgo()
+        app = ModeloImpactoAsteroide.crear_app(
+            positions, times, lats, lons, corredor, impacto, riesgo_frames, R_e, nframes_riesgo
+        )
+
+        app.run(host="127.0.0.1", port=5000, debug=False)
 
     # =======================================================
-    def ecuaciones_movimiento(self, r, v):
+    def ecuaciones_movimiento(mu, r, v):
         rnorm = np.linalg.norm(r) + 1e-18
-        a = -self.mu * r / (rnorm ** 3)
+        a = -mu * r / (rnorm ** 3)
         return v, a
 
     # =======================================================
-    def simular_trayectoria(self):
-        """Simula hasta impacto o fin de duración."""
-        t_max_s = self.duracion_horas * 3600.0
-        max_steps = int(t_max_s / self.dt_s)
-        r = self.r0_m.copy()
-        v = self.v0_ms.copy()
+    def simular_trayectoria(mu, r_earth_m, r0_m, v0_ms, duracion_horas, dt_s):
+        t_max_s = duracion_horas * 3600.0
+        max_steps = int(t_max_s / dt_s)
+        r = np.array(r0_m, dtype=float)
+        v = np.array(v0_ms, dtype=float)
         positions, times = [], []
         t0 = datetime.utcnow()
 
         for step in range(max_steps):
             positions.append(r.copy())
-            times.append(t0 + timedelta(seconds=step * self.dt_s))
-            dr, a = self.ecuaciones_movimiento(r, v)
-            v += a * self.dt_s
-            r += dr * self.dt_s
-            if np.linalg.norm(r) <= self.r_earth_m:
+            times.append(t0 + timedelta(seconds=step * dt_s))
+            dr, a = ModeloImpactoAsteroide.ecuaciones_movimiento(mu, r, v)
+            v += a * dt_s
+            r += dr * dt_s
+            if np.linalg.norm(r) <= r_earth_m:
                 positions.append(r.copy())
-                times.append(t0 + timedelta(seconds=(step+1) * self.dt_s))
+                times.append(t0 + timedelta(seconds=(step + 1) * dt_s))
                 break
         return np.array(positions), np.array(times)
 
     # =======================================================
-    def proyectar_a_tierra(self, positions):
+    def proyectar_a_tierra(positions):
         rnorm = np.linalg.norm(positions, axis=1) + 1e-18
         lats = np.degrees(np.arcsin(positions[:, 2] / rnorm))
         lons = np.degrees(np.arctan2(positions[:, 1], positions[:, 0]))
+
         rng = np.random.default_rng(42)
         ruido = rng.normal(0, 1.5, size=(len(lats), 2))
         corredor = np.vstack([lats + ruido[:, 0], lons + ruido[:, 1]]).T
@@ -90,39 +89,74 @@ class ModeloImpactoAsteroide:
         return lats, lons, corredor, impacto
 
     # =======================================================
-    def generar_frames_riesgo(self):
+    def generar_frames_riesgo(impacto, nframes_riesgo, lat_step_deg, lon_step_deg):
         frames = []
-        lat_edges = np.arange(-90, 90, self.lat_step_deg)
-        lon_edges = np.arange(-180, 180, self.lon_step_deg)
-        lat_centers = lat_edges + 0.5 * self.lat_step_deg
-        lon_centers = lon_edges + 0.5 * self.lon_step_deg
+        lat_edges = np.arange(-90, 90, lat_step_deg)
+        lon_edges = np.arange(-180, 180, lon_step_deg)
+        lat_centers = lat_edges + 0.5 * lat_step_deg
+        lon_centers = lon_edges + 0.5 * lon_step_deg
 
-        for idx in range(self.nframes_riesgo):
-            t = idx / (self.nframes_riesgo - 1)
+        for idx in range(nframes_riesgo):
+            t = idx / (nframes_riesgo - 1)
             baseline = 80.0 * (1 - t)
-            sigma = 70.0 * (1 - t) + 5.0
+            sigma = 60.0 * (1 - t) + 3.0
             peak = 100.0 * t
             frame_cells = []
             for latc in lat_centers:
                 for lonc in lon_centers:
-                    dlat = latc - self.impacto[0]
-                    dlon = (lonc - self.impacto[1] + 180) % 360 - 180
-                    dist = math.sqrt(dlat**2 + dlon**2)
-                    bump = peak * math.exp(-(dist**2) / (2 * sigma**2))
+                    dlat = latc - impacto[0]
+                    dlon = (lonc - impacto[1] + 180) % 360 - 180
+                    dist = math.sqrt(dlat ** 2 + dlon ** 2)
+                    bump = peak * math.exp(-(dist ** 2) / (2 * sigma ** 2))
                     prob = baseline + bump
                     prob = float(np.clip(prob, 0, 100))
                     frame_cells.append({
-                        "west": lonc - 0.5 * self.lon_step_deg,
-                        "south": latc - 0.5 * self.lat_step_deg,
-                        "east": lonc + 0.5 * self.lon_step_deg,
-                        "north": latc + 0.5 * self.lat_step_deg,
+                        "west": lonc - 0.5 * lon_step_deg,
+                        "south": latc - 0.5 * lat_step_deg,
+                        "east": lonc + 0.5 * lon_step_deg,
+                        "north": latc + 0.5 * lat_step_deg,
                         "prob": prob
                     })
             frames.append(frame_cells)
         return frames
 
     # =======================================================
-    def make_2d_map_png(self, width=1400, height=800, padding_deg=20):
+    def crear_app(positions, times, lats, lons, corredor, impacto, riesgo_frames, r_earth_m, nframes_riesgo):
+        app = Flask(__name__)
+
+        @app.route("/")
+        def index():
+            return render_template_string(ModeloImpactoAsteroide.html_template(), nframes=nframes_riesgo)
+
+        @app.route("/trayectoria")
+        def trayectoria():
+            rnorm = np.linalg.norm(positions, axis=1)
+            alts = rnorm - r_earth_m
+            return jsonify({
+                "positions": [
+                    {"lat": float(lat), "lon": float(lon), "alt": float(max(0, alt))}
+                    for lat, lon, alt in zip(
+                        np.degrees(np.arcsin(positions[:, 2] / rnorm)),
+                        np.degrees(np.arctan2(positions[:, 1], positions[:, 0])),
+                        alts
+                    )
+                ],
+                "times": [t.isoformat() for t in times]
+            })
+
+        @app.route("/riesgo/<int:f>")
+        def riesgo(f):
+            return jsonify(riesgo_frames[f % nframes_riesgo])
+
+        @app.route("/map2d.png")
+        def map2d():
+            buf = ModeloImpactoAsteroide.make_2d_map_png(lats, lons, corredor, impacto, times)
+            return send_file(buf, mimetype="image/png")
+
+        return app
+
+    # =======================================================
+    def make_2d_map_png(lats, lons, corredor, impacto, times, width=1400, height=800, padding_deg=30):
         fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
         ax = plt.axes(projection=ccrs.PlateCarree())
         ax.set_title("Trayectoria final y zona probable de impacto (95%)", fontsize=14)
@@ -131,23 +165,19 @@ class ModeloImpactoAsteroide:
         ax.add_feature(cfeature.COASTLINE, linewidth=0.6)
         ax.add_feature(cfeature.BORDERS, linewidth=0.4)
 
-        # trayectoria y corredor
-        ax.plot(self.lons, self.lats, linestyle='--', color='red', linewidth=2, label='Órbita nominal (proyección)')
-        ax.scatter(self.corredor[:, 1], self.corredor[:, 0], s=15, color='orange', alpha=0.35, label='Corredor 95%')
-        ax.scatter(self.impacto[1], self.impacto[0], color='red', s=250, alpha=0.7, marker='o', label='Zona de impacto')
+        ax.plot(lons, lats, linestyle='--', color='red', linewidth=2, label='Órbita nominal (proyección)')
+        ax.scatter(corredor[:, 1], corredor[:, 0], s=15, color='orange', alpha=0.35, label='Corredor 95%')
+        ax.scatter(impacto[1], impacto[0], color='red', s=250, alpha=0.7, marker='o', label='Zona de impacto')
 
-        # extent con contexto
-        min_lat = float(min(self.lats.min(), self.impacto[0]) - padding_deg)
-        max_lat = float(max(self.lats.max(), self.impacto[0]) + padding_deg)
-        min_lon = float(min(self.lons.min(), self.impacto[1]) - padding_deg)
-        max_lon = float(max(self.lons.max(), self.impacto[1]) + padding_deg)
+        min_lat = float(min(lats.min(), impacto[0]) - padding_deg)
+        max_lat = float(max(lats.max(), impacto[0]) + padding_deg)
+        min_lon = float(min(lons.min(), impacto[1]) - padding_deg)
+        max_lon = float(max(lons.max(), impacto[1]) + padding_deg)
         ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=ccrs.PlateCarree())
 
-        # marcar tiempos UTC
-        nlab = min(6, len(self.times))
-        for k in np.linspace(0, len(self.times) - 1, nlab, dtype=int):
-            ax.text(self.lons[k], self.lats[k], self.times[k].strftime("%H:%M UTC"),
-                    fontsize=8, color='black', transform=ccrs.PlateCarree())
+        nlab = min(6, len(times))
+        for k in np.linspace(0, len(times) - 1, nlab, dtype=int):
+            ax.text(lons[k], lats[k], times[k].strftime("%H:%M UTC"), fontsize=8, color='black', transform=ccrs.PlateCarree())
 
         ax.legend(loc='lower left')
         buf = io.BytesIO()
@@ -156,14 +186,9 @@ class ModeloImpactoAsteroide:
         buf.seek(0)
         return buf
 
-
-# =======================================================
-# Flask + CesiumJS
-# =======================================================
-app = Flask(__name__)
-modelo = None
-
-HTML_TEMPLATE = """<!DOCTYPE html>
+    # =======================================================
+    def html_template():
+        return """<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
@@ -211,8 +236,7 @@ document.getElementById("baseSelect").addEventListener("change",e=>{
 });
 
 const NFRAMES={{nframes}};
-let frame=0;let playing=true;let overlayEntities=[];let traj=[],trajTimes=[];
-let asteroid=null,trajEntity=null;
+let frame=0;let playing=true;let overlayEntities=[];let traj=[],trajTimes=[];let asteroid=null;let trajEntity=null;
 
 function probColor(p){
   if(p>=80)return Cesium.Color.RED.withAlpha(0.5);
@@ -255,44 +279,27 @@ document.getElementById("pauseBtn").onclick=()=>playing=false;
 (async function(){
   await loadTrajectory();
   drawFrame(0);
-  setInterval(()=>{
-    if(playing){drawFrame(frame);frame=(frame+1)%NFRAMES;}
-  },500);
+  setInterval(()=>{if(playing){drawFrame(frame);frame=(frame+1)%NFRAMES;}},500);
 })();
 </script>
-</body></html>
-"""
+</body></html>"""
 
-@app.route("/")
-def index():
-    return render_template_string(HTML_TEMPLATE, nframes=modelo.nframes_riesgo)
-
-@app.route("/trayectoria")
-def trayectoria():
-    pos = modelo.positions
-    rnorm = np.linalg.norm(pos, axis=1)
-    lats = np.degrees(np.arcsin(pos[:,2]/rnorm))
-    lons = np.degrees(np.arctan2(pos[:,1],pos[:,0]))
-    alts = rnorm - modelo.r_earth_m
-    return jsonify({
-        "positions":[{"lat":float(lat),"lon":float(lon),"alt":float(max(0,alt))} for lat,lon,alt in zip(lats,lons,alts)],
-        "times":[t.isoformat() for t in modelo.times]
-    })
-
-@app.route("/riesgo/<int:f>")
-def riesgo(f):
-    return jsonify(modelo.riesgo_frames[f % modelo.nframes_riesgo])
-
-@app.route("/map2d.png")
-def map2d():
-    buf=modelo.make_2d_map_png()
-    return send_file(buf,mimetype="image/png")
 
 # =======================================================
 # MAIN
 # =======================================================
-if __name__=="__main__":
+if __name__ == "__main__":
     print("Inicializando simulación de impacto...")
-    modelo=ModeloImpactoAsteroide()
     print("Listo. Abre http://127.0.0.1:5000/ en tu navegador.")
-    app.run(host="127.0.0.1",port=5000,debug=False)
+
+    mu =3.986004418e14 # parámetro gravitacional estándar de la Tierra
+    R_e = 6371000.0# Radio de la Tierra en [m]
+    I0_pos = [0.0, -7.5e6, 4.0e6]  # posición inicial
+    V_mov = [2500.0, 4500.0, -7200.0] # Velocidad  [m/s]
+    d_ast = 3000.0 # densidad [kg/m^3]
+    r_ast = 50.0 # radio [m]
+    S_time = 1.0 # duración de la simulación [horas]
+    S_Step = 2.0 # paso temporal de la simulación [segundos]
+    In_angle = 35 # angulo de entrada [°]
+    vH0 = 5.0 # velocidad horizontal inicial, lateral [Km/s]
+    vV0 = 5.0 # velocidad vertical inicial, cae [Km/s]
