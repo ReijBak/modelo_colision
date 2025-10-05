@@ -48,8 +48,6 @@ class ModeloImpactoAsteroide:
             positions, times, lats, lons, corredor, impacto, riesgo_frames, R_e, nframes_riesgo
         )
 
-        app2.run(host="127.0.0.1", port=5000, debug=False)
-
     # =======================================================
     def ecuaciones_movimiento(mu, r, v):
         rnorm = np.linalg.norm(r) + 1e-18
@@ -288,20 +286,30 @@ document.getElementById("pauseBtn").onclick=()=>playing=false;
 # =======================================================
 # MAIN
 # =======================================================
+print("Inicializando simulación de impacto...")
+
+mu = 3.986004418e14  # parámetro gravitacional estándar de la Tierra
+R_e = 6371000.0      # Radio de la Tierra en [m]
+I0_pos = [0.0, -7.5e6, 4.0e6]  # posición inicial
+V_mov = [2500.0, 4500.0, -7200.0]  # velocidad [m/s]
+d_ast = 3000.0  # densidad [kg/m^3]
+r_ast = 50.0    # radio [m]
+S_time = 1.0    # duración [horas]
+S_Step = 2.0    # paso temporal [s]
+In_angle = 35
+vH0 = 5.0
+vV0 = 5.0
+
+# --- Simular trayectoria ---
+positions, times = ModeloImpactoAsteroide.simular_trayectoria(mu, R_e, I0_pos, V_mov, S_time, S_Step)
+lats, lons, corredor, impacto = ModeloImpactoAsteroide.proyectar_a_tierra(positions)
+riesgo_frames = ModeloImpactoAsteroide.generar_frames_riesgo(impacto, 35, 5.0, 5.0)
+
+# --- Crear app Flask y exponerla globalmente ---
+app = ModeloImpactoAsteroide.crear_app(
+    positions, times, lats, lons, corredor, impacto, riesgo_frames, R_e, 35
+)
+
+# --- Solo para pruebas locales ---
 if __name__ == "__main__":
-    print("Inicializando simulación de impacto...")
-
-    mu =3.986004418e14 # parámetro gravitacional estándar de la Tierra
-    R_e = 6371000.0# Radio de la Tierra en [m]
-    I0_pos = [0.0, -7.5e6, 4.0e6]  # posición inicial
-    V_mov = [2500.0, 4500.0, -7200.0] # Velocidad  [m/s]
-    d_ast = 3000.0 # densidad [kg/m^3]
-    r_ast = 50.0 # radio [m]
-    S_time = 1.0 # duración de la simulación [horas]
-    S_Step = 2.0 # paso temporal de la simulación [segundos]
-    In_angle = 35 # angulo de entrada [°]
-    vH0 = 5.0 # velocidad horizontal inicial, lateral [Km/s]
-    vV0 = 5.0 # velocidad vertical inicial, cae [Km/s]
-
-    ModeloImpactoAsteroide(mu, R_e, I0_pos, V_mov, d_ast, r_ast, S_time, S_Step, In_angle, vH0, vV0)
-    
+    app.run(host="0.0.0.0", port=5000)
