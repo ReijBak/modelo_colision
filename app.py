@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
+app = Flask(__name__)
 
 # =======================================================
 # CLASE PRINCIPAL (estructura limpia sin self.)
@@ -122,7 +123,6 @@ class ModeloImpactoAsteroide:
 
     # =======================================================
     def crear_app(positions, times, lats, lons, corredor, impacto, riesgo_frames, r_earth_m, nframes_riesgo):
-        app = Flask(__name__)
 
         @app.route("/")
         def index():
