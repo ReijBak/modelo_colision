@@ -43,11 +43,11 @@ class ModeloImpactoAsteroide:
             impacto, nframes_riesgo, lat_step_deg, lon_step_deg
         )
 
-        app = ModeloImpactoAsteroide.crear_app(
+        app2 = ModeloImpactoAsteroide.crear_app(
             positions, times, lats, lons, corredor, impacto, riesgo_frames, R_e, nframes_riesgo
         )
 
-        app.run(host="127.0.0.1", port=5000, debug=False)
+        app2.run(host="127.0.0.1", port=5000, debug=False)
 
     # =======================================================
     def ecuaciones_movimiento(mu, r, v):
@@ -290,7 +290,6 @@ document.getElementById("pauseBtn").onclick=()=>playing=false;
 # =======================================================
 if __name__ == "__main__":
     print("Inicializando simulación de impacto...")
-    print("Listo. Abre http://127.0.0.1:5000/ en tu navegador.")
 
     mu =3.986004418e14 # parámetro gravitacional estándar de la Tierra
     R_e = 6371000.0# Radio de la Tierra en [m]
@@ -303,3 +302,6 @@ if __name__ == "__main__":
     In_angle = 35 # angulo de entrada [°]
     vH0 = 5.0 # velocidad horizontal inicial, lateral [Km/s]
     vV0 = 5.0 # velocidad vertical inicial, cae [Km/s]
+
+    ModeloImpactoAsteroide(mu, R_e, I0_pos, V_mov, d_ast, r_ast, S_time, S_Step, In_angle, vH0, vV0)
+    
